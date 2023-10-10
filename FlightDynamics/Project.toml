@@ -1,0 +1,4 @@
+name = "FlightDynamics"
+uuid = "4fbcdcda-fc4c-4a04-84ec-aff58cbee88c"
+authors = ["Julian Kizanis <julianzia@gmail.com>"]
+version = "0.1.0"
