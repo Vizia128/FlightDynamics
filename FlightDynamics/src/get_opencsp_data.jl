@@ -1,4 +1,4 @@
-using Printf, DataFrames, CSV
+using Printf, DataFrames, CSV, Random, JLD2
 
 
 function update_parameters(lines::Vector{String}, updates::Dict{String, Float64})
@@ -24,10 +24,10 @@ end
 function change_flight_parameters(vspaero_dir::String, updates::Dict{String, Float64})
     lines = readlines(vspaero_dir)
     lines = update_parameters(lines, updates)
-    write("C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/A2M6/test.txt", join(lines, "/n"))
+    write(vspaero_dir, join(lines, "\n"))
 end
 
-function read_results_to_dataframe(filename::String)
+function read_polars_to_dataframe(filename::String)
     # Read all lines from the file
     lines = readlines(filename)
     
@@ -36,8 +36,8 @@ function read_results_to_dataframe(filename::String)
     data_line = lines[2]
     
     # Split and strip both headers and data
-    headers = strip.(split(header_line, r"/s+"))
-    data_str = strip.(split(data_line, r"/s+"))
+    headers = strip.(split(header_line, r"\s+"))
+    data_str = strip.(split(data_line, r"\s+"))
     
     # Remove any empty strings
     headers = filter(x -> x != "", headers)
@@ -56,12 +56,18 @@ function read_results_to_dataframe(filename::String)
 end
 
 function get_parameters()::Dict
-    
+    return Dict(
+        "AoA" => 40rand() - 20,
+        "Beta" => 40rand() - 20,
+        "ReCref" => 10^(3rand() + 4),
+        "Ailerons" => 40rand() - 20,
+        "Rudder" => 40rand() - 20,
+        "Elevator" => 40rand() - 20,
+        "Flaps" => 40rand() - 20,
+    )
 end
 
-function run_vspaero_and_wait(
-    command::Cmd = `C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/OpenVSP-3.35.3-win64/vspaero.exe -omp 16 C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/A2M6/A2M6_DegenGeom`
-)
+function run_vspaero_and_wait(command::Cmd)
     cmd = pipeline(command, stdout=IOBuffer())
     process = run(cmd, wait=false)  # run asynchronously
 
@@ -82,28 +88,32 @@ end
 function create_vspaero_training_data(
     num_data_points;
     vspaero_config_dir::String = "C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/A2M6/A2M6_DegenGeom.vspaero", 
-    vspaero_results_dir::String = "C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/A2M6/A2M6_DegenGeom.polars", 
-    training_data_dir::String = "training_data.csv",
+    vspaero_results_dir::String = "C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/A2M6/A2M6_DegenGeom.polar", 
+    training_data_dir::String = "C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/training_data.csv",
     command::Cmd = `C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/OpenVSP-3.35.3-win64/vspaero.exe -omp 16 C:/Users/kizan/OneDrive/Documents/__Aves_Nova/FlightDynamics/openvsp/A2M6/A2M6_DegenGeom`,
 )
-    parameters = get_parameters()
-    change_flight_parameters(vspaero_config_dir, parameters)
-    df = read_results_to_dataframe(vspaero_results_dir)
+    training_data::DataFrame = DataFrame()
 
-    for _ in 1:num_data_points
+    for iter in 1:num_data_points
         parameters = get_parameters()
         change_flight_parameters(vspaero_config_dir, parameters)
-
+    
         exitcode = run_vspaero_and_wait(command)
         if exitcode != 0
             @warn "vspaero failed with exit code $exitcode"
-            continue  # Skip this iteration and proceed to the next one
+            return
         end
+    
+        params = DataFrame(parameters)
+        polars = read_polars_to_dataframe(vspaero_results_dir)
 
-        df = vcat(df, read_results_to_dataframe(vspaero_results_dir))
+        df_local::DataFrame = hcat(params, polars; makeunique=true)
+        training_data = vcat(training_data, df_local)
 
-        CSV.write(training_data_dir, df)
+        CSV.write(training_data_dir, training_data)
+        jldsave("training_data_20_deg_radius.jld2"; training_data)
+        println("Finished simulation run $iter")
     end
 end
 
-# create_vspaero_training_data(1024)
+create_vspaero_training_data(4096)
